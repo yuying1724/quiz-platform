@@ -99,6 +99,8 @@ function handle_(p, body) {
         data = saveAnswers(body.recs || []); break;
       case 'ping':
         data = { time: new Date().toISOString() }; break;
+      case 'import':
+        data = importQuestions(body.rows || []); break;
       default:
         return json_({ ok: false, error: 'unknown action: ' + action });
     }
@@ -234,6 +236,31 @@ function saveAnswers(recs) {
   });
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, LOG_COLS.length).setValues(rows);
   return { saved: rows.length };
+}
+
+/**
+ * 批次匯入題目到「題庫」。rows = [[題號,科目,來源,章節,學習目標,題目,選項1..5,答案,教材頁碼,啟用], ...]
+ * 題號已存在的列會略過，回傳 { added, skipped }。
+ */
+function importQuestions(rows) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BANK);
+  if (!sh) throw new Error('找不到「題庫」工作表，請先執行 setup()。');
+  var existing = {};
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach(function (r) { existing[String(r[0]).trim()] = true; });
+  }
+  var toAdd = [], skipped = [];
+  rows.forEach(function (r) {
+    if (!r || r.length < BANK_COLS.length) return;
+    var id = String(r[0]).trim();
+    if (!id || existing[id]) { skipped.push(id); return; }
+    existing[id] = true;
+    var row = r.slice(0, BANK_COLS.length).map(function (v) { return v === null || v === undefined ? '' : v; });
+    row[3] = Number(row[3]); row[11] = Number(row[11]);
+    toAdd.push(row);
+  });
+  if (toAdd.length) sh.getRange(sh.getLastRow() + 1, 1, toAdd.length, BANK_COLS.length).setValues(toAdd);
+  return { added: toAdd.length, skipped: skipped };
 }
 
 /** 某科目的歷次場次摘要（最近 20 場） */
