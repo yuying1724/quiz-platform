@@ -12,6 +12,7 @@
  *   GET  ?token=…&action=history&subject=…
  *   POST body(JSON): { token, action:'answer',  rec:{…} }
  *   POST body(JSON): { token, action:'answers', recs:[{…}] }
+ *   POST body(JSON): { token, action:'deleteSession', subject, session }
  */
 
 var SHEET_BANK = '題庫';
@@ -101,6 +102,8 @@ function handle_(p, body) {
         data = { time: new Date().toISOString() }; break;
       case 'import':
         data = importQuestions(body.rows || []); break;
+      case 'deleteSession':
+        data = deleteSession(body.subject, body.session); break;
       default:
         return json_({ ok: false, error: 'unknown action: ' + action });
     }
@@ -261,6 +264,20 @@ function importQuestions(rows) {
   });
   if (toAdd.length) sh.getRange(sh.getLastRow() + 1, 1, toAdd.length, BANK_COLS.length).setValues(toAdd);
   return { added: toAdd.length, skipped: skipped };
+}
+
+/** 刪除某科目某一場次的所有作答紀錄，回傳 { deleted } */
+function deleteSession(subject, session) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
+  if (!sh || sh.getLastRow() < 2) return { deleted: 0 };
+  if (!session) throw new Error('缺少場次');
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, LOG_COLS.length).getValues();
+  var rows = [];
+  values.forEach(function (r, i) {
+    if (String(r[1]) === String(session) && (!subject || String(r[2]) === String(subject))) rows.push(i + 2);
+  });
+  rows.reverse().forEach(function (row) { sh.deleteRow(row); });
+  return { deleted: rows.length };
 }
 
 /** 某科目的歷次場次摘要（最近 20 場） */
