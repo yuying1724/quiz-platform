@@ -61,6 +61,8 @@
   .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   td, th { padding:8px 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  .sess { cursor:pointer; } .sess:active { background:var(--bg); }
+  .score-s { font-weight:800; font-size:18px; }
   .topbar { display:flex; justify-content:space-between; align-items:flex-start; }
   .star { color:var(--gold); }
   /* 底部分頁列 */
@@ -330,12 +332,13 @@ function loadHistory(){
     var h = '<h1>作答紀錄 · '+esc(state.subject)+'</h1>';
     if (!rows.length) h += '<div class="card muted">尚無紀錄</div>';
     else {
-      h += '<div class="card"><table><tr><th>時間</th><th>章節</th><th>模式</th><th>成績</th><th></th></tr>';
-      rows.forEach(function(r){ var d=new Date(r.time);
-        h += '<tr><td>'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+'</td>'
-           + '<td>'+r.chapters.join(', ')+'</td><td>'+esc(r.mode)+'</td><td>'+r.correct+'/'+r.total+'（'+Math.round(100*r.correct/r.total)+'%）</td>'
-           + '<td><button class="link" style="color:var(--bad)" onclick="deleteSession(\''+esc(r.session)+'\','+r.total+')">刪除</button></td></tr>'; });
-      h += '</table></div>';
+      h += '<div class="muted" style="margin-bottom:8px">點一場可看每一題的作答內容</div>';
+      rows.forEach(function(r){ var d=new Date(r.time), pct=Math.round(100*r.correct/r.total);
+        h += '<div class="card sess" onclick="showSession(\''+esc(r.session)+'\')">'
+           + '<div class="row" style="justify-content:space-between"><b>'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+'</b>'
+           + '<span class="score-s" style="color:'+(pct>=70?'var(--ok)':'var(--bad)')+'">'+r.correct+'/'+r.total+'（'+pct+'%）</span></div>'
+           + '<div class="row" style="justify-content:space-between;margin-top:4px"><span class="muted">第 '+r.chapters.join(', ')+' 章 · '+esc(r.mode)+'</span>'
+           + '<span><button class="link">看明細 ›</button><button class="link" style="color:var(--bad)" onclick="event.stopPropagation();deleteSession(\''+esc(r.session)+'\','+r.total+')">刪除</button></span></div></div>'; });
     }
     h += '<button class="wide" onclick="renderHome()">回首頁</button>';
     $(h,'history');
@@ -346,6 +349,45 @@ function deleteSession(session, n){
   if (!confirm('刪除這場的 '+n+' 筆作答紀錄？刪除後無法復原。')) return;
   $('<div class="spin">刪除中…</div>','history');
   apiPost('deleteSession', { subject: state.subject, session: session }).then(loadHistory).catch(fail);
+}
+
+// 場次明細：每一題的題目、我的答案、正確答案、對錯、教材頁碼
+function showSession(session){
+  $('<div class="spin">載入中…</div>','history');
+  apiGet('sessionDetail', { subject: state.subject, session: session }).then(function(d){
+    if (!d.items.length){ $('<div class="card muted">這場沒有紀錄</div><button class="wide" onclick="loadHistory()">回紀錄</button>','history'); return; }
+    var first = d.items[0], dt = new Date(first.time), pct = Math.round(100*d.correct/d.total);
+    var wrong = d.items.filter(function(i){ return !i.correct; });
+    var h = '<div class="muted"><button class="link" onclick="loadHistory()">‹ 作答紀錄</button></div>'
+          + '<h1>場次明細</h1><div class="sub">'+dt.getFullYear()+'/'+(dt.getMonth()+1)+'/'+dt.getDate()+' '+('0'+dt.getHours()).slice(-2)+':'+('0'+dt.getMinutes()).slice(-2)+' · '+esc(first.mode)+'</div>'
+          + '<div class="kpis"><div class="kpi"><div class="l">題數</div><div class="v">'+d.total+'</div></div>'
+          + '<div class="kpi"><div class="l">答對</div><div class="v" style="color:var(--ok)">'+d.correct+'</div></div>'
+          + '<div class="kpi"><div class="l">正確率</div><div class="v" style="color:'+(pct>=70?'var(--ok)':'var(--bad)')+'">'+pct+'%</div></div></div>';
+    if (wrong.length) h += '<button class="primary wide" style="margin-bottom:12px" onclick="retrySession()">重練這場答錯的 '+wrong.length+' 題</button>';
+    d.items.forEach(function(it, n){
+      h += '<div class="card" style="border-left:4px solid '+(it.correct?'var(--ok)':'var(--bad)')+'">'
+         + '<div class="row" style="justify-content:space-between"><span class="muted">'+(n+1)+'. '+esc(it.id)+' · 第 '+it.chapter+' 章</span>'
+         + '<span style="font-weight:700;color:'+(it.correct?'var(--ok)':'var(--bad)')+'">'+(it.correct?'答對':'答錯')+'</span></div>';
+      if (it.objective) h += '<div class="obj" style="margin-top:8px">學習目標：'+esc(it.objective)+'</div>';
+      h += '<div class="stem" style="margin:8px 0">'+esc(it.stem)+'</div>';
+      it.options.forEach(function(o,i){ var k=i+1, cls = k===it.answer?'ok':(k===it.chosen?'bad':'');
+        var tag = k===it.answer ? '　✓ 正確答案' : (k===it.chosen ? '　✗ 我的答案' : '');
+        h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+k+'）'+esc(o)+'<span class="muted" style="font-size:12px">'+tag+'</span></div>'; });
+      h += '<div class="muted" style="margin-top:6px">教材出處：'+esc(it.page)+'</div></div>';
+    });
+    h += '<button class="wide" onclick="loadHistory()">回作答紀錄</button>';
+    window._detail = d;
+    $(h,'history');
+  }).catch(fail);
+}
+function retrySession(){
+  var d = window._detail; if (!d) return;
+  var qs = d.items.filter(function(i){ return !i.correct; }).map(function(i){
+    return { id:i.id, subject:state.subject, chapter:i.chapter, source:i.source, objective:i.objective, stem:i.stem, options:i.options, answer:i.answer, page:i.page };
+  });
+  state.mock=false; state.mode='practice'; state.onlyWrong=true;
+  state.queue=prepare(qs); state.idx=0; state.answers={}; state.session=newSession();
+  curTab='wrong'; renderQ();
 }
 
 // ---------- PWA ----------
