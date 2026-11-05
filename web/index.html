@@ -330,15 +330,22 @@ function loadHistory(){
     var h = '<h1>作答紀錄 · '+esc(state.subject)+'</h1>';
     if (!rows.length) h += '<div class="card muted">尚無紀錄</div>';
     else {
-      h += '<div class="card"><table><tr><th>時間</th><th>章節</th><th>模式</th><th>成績</th></tr>';
+      h += '<div class="card"><table><tr><th>時間</th><th>章節</th><th>模式</th><th>成績</th><th></th></tr>';
       rows.forEach(function(r){ var d=new Date(r.time);
         h += '<tr><td>'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+'</td>'
-           + '<td>'+r.chapters.join(', ')+'</td><td>'+esc(r.mode)+'</td><td>'+r.correct+'/'+r.total+'（'+Math.round(100*r.correct/r.total)+'%）</td></tr>'; });
+           + '<td>'+r.chapters.join(', ')+'</td><td>'+esc(r.mode)+'</td><td>'+r.correct+'/'+r.total+'（'+Math.round(100*r.correct/r.total)+'%）</td>'
+           + '<td><button class="link" style="color:var(--bad)" onclick="deleteSession(\''+esc(r.session)+'\','+r.total+')">刪除</button></td></tr>'; });
       h += '</table></div>';
     }
     h += '<button class="wide" onclick="renderHome()">回首頁</button>';
     $(h,'history');
   }).catch(fail);
+}
+
+function deleteSession(session, n){
+  if (!confirm('刪除這場的 '+n+' 筆作答紀錄？刪除後無法復原。')) return;
+  $('<div class="spin">刪除中…</div>','history');
+  apiPost('deleteSession', { subject: state.subject, session: session }).then(loadHistory).catch(fail);
 }
 
 // ---------- PWA ----------
