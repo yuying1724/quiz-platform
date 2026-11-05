@@ -69,6 +69,7 @@
   .tabbar button { flex:1; border:none; background:none; border-radius:0; padding:4px 0; color:var(--muted); font-size:12px; display:flex; flex-direction:column; align-items:center; gap:2px; }
   .tabbar button svg { width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   .tabbar button.on { color:var(--primary); font-weight:700; }
+  .timer { font-weight:700; font-variant-numeric:tabular-nums; } .timer.low { color:var(--bad); }
 </style>
 </head>
 <body>
@@ -87,8 +88,8 @@ function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')
 function saveCfg(c){ try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){} }
 var cfg = loadCfg();
 
-var state = { meta:null, subject:null, chapters:{}, source:'all', mode:'practice',
-              queue:[], idx:0, answers:{}, session:null, onlyWrong:false, pending:[] };
+var state = { meta:null, subject:null, chapters:{}, source:'all', mode:'practice', shuffleQ:false, shuffleO:false,
+              queue:[], idx:0, answers:{}, session:null, onlyWrong:false, mock:false, mockMin:120, deadline:null, timer:null };
 
 var curTab='home';
 function $(html, tab){ document.getElementById('app').innerHTML = html; window.scrollTo(0,0);
@@ -139,6 +140,7 @@ function saveSettings(){
 
 // ---------- 首頁 ----------
 function loadHome(){
+  stopTimer();
   if (!cfg.apiUrl || !cfg.token) return renderSettings();
   $('<div class="spin">載入中…</div>');
   apiGet('meta').then(function(m){
@@ -174,16 +176,22 @@ function renderHome(){
 
   h += '<div class="card"><b>題目來源</b><div class="seg" style="margin:8px 0 14px">'
      + segBtn('source','all','全部') + segBtn('source','練習題','練習題') + segBtn('source','模擬試題','模擬試題') + '</div>'
-     + '<b>模式</b><div class="seg" style="margin:8px 0 4px">'
-     + segBtn('mode','practice','練習：每題立即看答案') + segBtn('mode','exam','測驗：全部答完再對答案') + '</div></div>';
+     + '<b>模式</b><div class="seg" style="margin:8px 0 14px">'
+     + segBtn('mode','practice','練習：每題立即看答案') + segBtn('mode','exam','測驗：全部答完再對答案') + '</div>'
+     + '<div class="row"><span style="flex:1"><b>題目順序</b><div class="seg" style="margin-top:6px">' + segBtn('shuffleQ',false,'依序') + segBtn('shuffleQ',true,'隨機') + '</div></span>'
+     + '<span style="flex:1"><b>選項順序</b><div class="seg" style="margin-top:6px">' + segBtn('shuffleO',false,'固定') + segBtn('shuffleO',true,'打亂') + '</div></span></div></div>';
 
   var n = selectedChapters().length;
+  var wrongSel = n ? s.chapters.filter(function(c){ return state.chapters[c.chapter]; }).reduce(function(a,c){ return a+c.wrong; },0) : s.wrong;
+  var mockN = s.chapters.reduce(function(a,c){ return a+c.mock; },0);
   h += '<button class="primary wide" '+(n?'':'disabled')+' onclick="startQuiz(false)">開始（'+n+' 章）</button>'
-     + '<button class="wide" '+(s.wrong?'':'disabled')+' onclick="startQuiz(true)">只重練錯題（'+s.wrong+' 題，不限章節）</button>'
-     + '<button class="wide" onclick="loadHistory()">作答紀錄</button>';
+     + '<button class="wide" '+(wrongSel?'':'disabled')+' onclick="startQuiz(true)">只重練錯題（'+wrongSel+' 題'+(n?'，勾選的章節':'，全部章節')+'）</button>';
+  h += '<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><b>模擬考</b><span class="muted">'+mockN+' 題 · 隨機順序 · 70 分及格</span></div>'
+     + '<div class="row" style="margin-top:8px"><span class="muted">作答時間</span><div class="seg" style="flex:1">' + segBtn('mockMin',60,'60 分') + segBtn('mockMin',90,'90 分') + segBtn('mockMin',120,'120 分') + '</div></div>'
+     + '<button class="primary wide" '+(mockN?'':'disabled')+' onclick="startMock()">開始模擬考</button></div>';
   $(h,'home');
 }
-function segBtn(key,val,label){ return '<button class="'+(state[key]===val?'on':'')+'" onclick="state.'+key+'=\''+val+'\';renderHome()">'+label+'</button>'; }
+function segBtn(key,val,label){ var v = typeof val==='string' ? "'"+val+"'" : String(val); return '<button class="'+(state[key]===val?'on':'')+'" onclick="state.'+key+'='+v+';renderHome()">'+label+'</button>'; }
 function pickSubject(n){ state.subject=n; state.chapters={}; renderHome(); }
 function toggleCh(c,on){ state.chapters[c]=on; renderHome(); }
 function selAll(on){ curSubject().chapters.forEach(function(c){ state.chapters[c.chapter]=on; }); renderHome(); }
@@ -191,34 +199,65 @@ function selectedChapters(){ return Object.keys(state.chapters).filter(function(
 
 // ---------- 測驗 ----------
 function newSession(){ return new Date().toISOString().replace(/[-:T]/g,'').slice(0,14); }
+function shuffle(a){ for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+function prepare(qs){
+  qs.forEach(function(q){ var idx = q.options.map(function(_,i){ return i; }); q.perm = state.shuffleO ? shuffle(idx) : idx; });
+  return qs;
+}
 function startQuiz(onlyWrong){
-  state.onlyWrong = onlyWrong;
+  state.onlyWrong = onlyWrong; state.mock = false; stopTimer();
   $('<div class="spin">出題中…</div>');
-  apiGet('questions', { subject:state.subject, chapters: onlyWrong?'':selectedChapters().join(','), source: onlyWrong?'all':state.source, onlyWrong: onlyWrong?1:0 })
+  apiGet('questions', { subject:state.subject, chapters: selectedChapters().join(','), source: onlyWrong?'all':state.source, onlyWrong: onlyWrong?1:0, shuffle: state.shuffleQ?1:0 })
   .then(function(qs){
     if (!qs.length){ $('<div class="card">沒有符合條件的題目。</div><button class="wide" onclick="renderHome()">回首頁</button>'); return; }
-    state.queue=qs; state.idx=0; state.answers={}; state.session=newSession();
+    state.queue=prepare(qs); state.idx=0; state.answers={}; state.session=newSession();
     curTab = onlyWrong?'wrong':'home';
     renderQ();
   }).catch(fail);
+}
+function startMock(){
+  if (!confirm('開始模擬考？'+state.mockMin+' 分鐘內作答全部模擬試題，時間到自動交卷。')) return;
+  state.onlyWrong = false; state.mock = true; state.mode = 'exam'; stopTimer();
+  $('<div class="spin">出題中…</div>');
+  apiGet('questions', { subject:state.subject, chapters:'', source:'模擬試題', onlyWrong:0, shuffle:1 })
+  .then(function(qs){
+    if (!qs.length){ $('<div class="card">沒有模擬試題。</div><button class="wide" onclick="renderHome()">回首頁</button>'); return; }
+    var so = state.shuffleO; state.shuffleO = true; state.queue=prepare(qs); state.shuffleO = so;
+    state.idx=0; state.answers={}; state.session=newSession();
+    state.deadline = Date.now() + state.mockMin*60000;
+    state.timer = setInterval(tick, 1000);
+    curTab='home'; renderQ();
+  }).catch(fail);
+}
+function stopTimer(){ if (state.timer){ clearInterval(state.timer); state.timer=null; } state.deadline=null; }
+function remain(){ return Math.max(0, Math.floor((state.deadline - Date.now())/1000)); }
+function fmt(sec){ var m=Math.floor(sec/60), s=sec%60; return m+':'+('0'+s).slice(-2); }
+function tick(){
+  var el=document.getElementById('timer'); var r=remain();
+  if (el){ el.textContent='⏱ '+fmt(r); el.classList.toggle('low', r<300); }
+  if (r<=0){ stopTimer(); alert('時間到，自動交卷。'); finish(true); }
 }
 
 function renderQ(){
   var q = state.queue[state.idx], a = state.answers[q.id];
   var reveal = (state.mode==='practice' && a!==undefined);
-  var h = '<div class="muted row" style="justify-content:space-between"><span>'+esc(state.subject)+' · 第 '+q.chapter+' 章 · '+esc(q.source)+' '+esc(q.id)+'</span><span>'+(state.idx+1)+' / '+state.queue.length+'</span></div>';
+  var left = state.mock ? '模擬考' : esc(state.subject)+' · 第 '+q.chapter+' 章 · '+esc(q.source)+' '+esc(q.id);
+  var right = (state.mock ? '<span id="timer" class="timer'+(remain()<300?' low':'')+'">⏱ '+fmt(remain())+'</span> · ' : '') + (state.idx+1)+' / '+state.queue.length;
+  var h = '<div class="muted row" style="justify-content:space-between"><span>'+left+'</span><span>'+right+'</span></div>';
   h += '<div class="progress"><i style="width:'+Math.round(100*(state.idx)/state.queue.length)+'%"></i></div>';
   h += '<div class="card">';
   if (q.objective) h += '<div class="obj">學習目標：'+esc(q.objective)+'</div>';
   h += '<div class="stem">'+esc(q.stem)+'</div>';
-  q.options.forEach(function(o,i){
-    var n=i+1, cls='opt';
+  var perm = q.perm || q.options.map(function(_,i){ return i; });
+  perm.forEach(function(oi,i){
+    var n=oi+1, cls='opt';
     if (reveal){ if(n===q.answer) cls+=' ok'; else if(n===a) cls+=' bad'; }
     else if (a===n) cls+=' sel';
-    h += '<button class="'+cls+'" '+(reveal?'disabled':'')+' onclick="choose('+n+')">（'+n+'）'+esc(o)+'</button>';
+    h += '<button class="'+cls+'" '+(reveal?'disabled':'')+' onclick="choose('+n+')">（'+(i+1)+'）'+esc(q.options[oi])+'</button>';
   });
   if (reveal){
-    h += '<div class="fb '+(a===q.answer?'ok':'bad')+'">'+(a===q.answer?'答對了':'答錯了，正確答案是（'+q.answer+'）')+'</div>';
+    var shown = perm.indexOf(q.answer-1)+1;
+    h += '<div class="fb '+(a===q.answer?'ok':'bad')+'">'+(a===q.answer?'答對了':'答錯了，正確答案是（'+shown+'）')+'</div>';
     h += '<div class="muted" style="margin-top:8px">教材出處：'+esc(q.page)+'</div>';
   }
   h += '</div>';
@@ -229,7 +268,7 @@ function renderQ(){
   h += '</div><div style="text-align:center;margin-top:12px"><button onclick="confirmQuit()">結束測驗</button></div>';
   $(h);
 }
-function rec(q,n){ return { session:state.session, subject:q.subject, chapter:q.chapter, id:q.id, source:q.source, chosen:n, answer:q.answer, mode: state.mode==='practice'?'練習':'測驗' }; }
+function rec(q,n){ return { session:state.session, subject:q.subject, chapter:q.chapter, id:q.id, source:q.source, chosen:n, answer:q.answer, mode: state.mock?'模擬考':(state.mode==='practice'?'練習':'測驗') }; }
 function choose(n){
   var q = state.queue[state.idx];
   if (state.mode==='practice' && state.answers[q.id]!==undefined) return;
@@ -239,9 +278,10 @@ function choose(n){
 }
 function nextQ(){ if (state.idx<state.queue.length-1){ state.idx++; renderQ(); } }
 function prevQ(){ if (state.idx>0){ state.idx--; renderQ(); } }
-function confirmQuit(){ if (confirm('確定結束？已作答的題目會保留紀錄。')) { if (state.mode==='exam') finish(true); else loadHome(); } }
+function confirmQuit(){ if (confirm('確定結束？已作答的題目會保留紀錄。')) { if (state.mode==='exam') finish(true); else { stopTimer(); loadHome(); } } }
 
 function finish(partial){
+  stopTimer();
   if (state.mode==='exam'){
     var recs = state.queue.filter(function(q){ return state.answers[q.id]!==undefined; }).map(function(q){ return rec(q, state.answers[q.id]); });
     if (recs.length) apiPost('answers', { recs: recs }).catch(function(e){ alert('成績儲存失敗：'+e.message); });
@@ -253,15 +293,24 @@ function renderResult(partial){
   var total=0, correct=0, wrong=[];
   state.queue.forEach(function(q){ var a=state.answers[q.id]; if(a===undefined) return; total++; if(a===q.answer) correct++; else wrong.push(q); });
   var pct = total?Math.round(100*correct/total):0;
-  var h = '<h1>結果</h1><div class="card" style="text-align:center"><div class="score">'+pct+'%</div>'
-        + '<div class="muted">'+correct+' / '+total+' 題正確'+(partial?'（未全部作答）':'')+(state.queue.length>=75?' · 正式考試 70 分及格':'')+'</div></div>';
+  var h;
+  if (state.mock){
+    var score = Math.round(correct*100/state.queue.length*10)/10, pass = score>=70;
+    h = '<h1>模擬考結果</h1><div class="card" style="text-align:center"><div class="score" style="color:'+(pass?'var(--ok)':'var(--bad)')+'">'+score+' 分</div>'
+      + '<div style="font-weight:700;color:'+(pass?'var(--ok)':'var(--bad)')+'">'+(pass?'及格':'不及格')+'（70 分及格）</div>'
+      + '<div class="muted">'+correct+' / '+state.queue.length+' 題正確'+(partial?'（未全部作答，未答以 0 分計）':'')+'</div></div>';
+  } else {
+    h = '<h1>結果</h1><div class="card" style="text-align:center"><div class="score">'+pct+'%</div>'
+      + '<div class="muted">'+correct+' / '+total+' 題正確'+(partial?'（未全部作答）':'')+'</div></div>';
+  }
   if (wrong.length){
     h += '<h2>答錯的題目</h2>';
     wrong.forEach(function(q){
       h += '<div class="card"><div class="muted">'+esc(q.id)+' · 第 '+q.chapter+' 章 · 教材出處 '+esc(q.page)+'</div>'
          + '<div class="stem" style="margin:6px 0">'+esc(q.stem)+'</div>';
-      q.options.forEach(function(o,i){ var n=i+1; var cls = n===q.answer?'ok':(n===state.answers[q.id]?'bad':'');
-        h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+n+'）'+esc(o)+'</div>'; });
+      var perm = q.perm || q.options.map(function(_,i){ return i; });
+      perm.forEach(function(oi,i){ var n=oi+1; var cls = n===q.answer?'ok':(n===state.answers[q.id]?'bad':'');
+        h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+(i+1)+'）'+esc(q.options[oi])+'</div>'; });
       h += '</div>';
     });
     h += '<button class="primary wide" onclick="retryWrong()">重練這些錯題</button>';
@@ -272,7 +321,7 @@ function renderResult(partial){
   $(h);
   window._wrong = wrong;
 }
-function retryWrong(){ state.queue = window._wrong; state.idx=0; state.answers={}; state.session=newSession(); renderQ(); }
+function retryWrong(){ state.mock=false; state.mode='practice'; state.queue = window._wrong; state.idx=0; state.answers={}; state.session=newSession(); renderQ(); }
 
 // ---------- 紀錄 ----------
 function loadHistory(){
