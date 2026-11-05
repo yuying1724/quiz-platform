@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#4e7d5b">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="測驗平台">
@@ -12,57 +12,73 @@
 <link rel="icon" href="icons/icon-192.png">
 <title>測驗平台</title>
 <style>
-  :root { --bg:#f5f6f8; --card:#fff; --text:#1f2328; --muted:#6b7280; --line:#e5e7eb;
-          --primary:#2563eb; --ok:#16a34a; --okbg:#ecfdf5; --bad:#dc2626; --badbg:#fef2f2; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#111418; --card:#1b2026; --text:#e6e8eb; --muted:#9aa3ad; --line:#2d3540;
-            --primary:#3b82f6; --ok:#22c55e; --okbg:#0f2a1c; --bad:#ef4444; --badbg:#2a1414; }
-  }
+  :root { --bg:#f4efdf; --card:#fffdf6; --text:#2d2a22; --muted:#7b7667; --line:#e4dcc6;
+          --primary:#4e7d5b; --primary-dark:#3f6a4b; --gold:#d9a21b; --ok:#3f7a4e; --okbg:#e8f1e6; --bad:#b4453a; --badbg:#f7e5e2;
+          --shadow:0 2px 6px rgba(80,60,20,.08); }
   * { box-sizing:border-box; }
+  html { color-scheme: light; }
   body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;
-         padding-bottom:env(safe-area-inset-bottom); }
-  .wrap { max-width:720px; margin:0 auto; padding:16px; }
-  h1 { font-size:20px; margin:0 0 12px; }
+         padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+  .wrap { max-width:720px; margin:0 auto; padding:16px 16px 8px; }
+  h1 { font-size:26px; font-weight:800; margin:4px 0 2px; letter-spacing:.5px; }
   h2 { font-size:17px; margin:16px 0 8px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px; box-shadow:var(--shadow); }
   .muted { color:var(--muted); font-size:14px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; box-shadow:var(--shadow); }
+  .kpi .l { color:var(--muted); font-size:13px; } .kpi .v { font-size:24px; font-weight:800; }
+  .kpi .v small { font-size:14px; font-weight:400; color:var(--muted); }
   button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text);
-           padding:10px 14px; border-radius:10px; cursor:pointer; }
+           padding:10px 14px; border-radius:12px; cursor:pointer; }
   button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }
   button.link { border:none; background:none; color:var(--primary); padding:4px 6px; }
-  button:disabled { opacity:.5; cursor:default; }
-  button.wide { width:100%; margin-top:8px; }
-  input[type=text], input[type=url] { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--text); }
-  label.chk { display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.wide { width:100%; margin-top:8px; padding:13px; font-weight:600; }
+  input[type=text], input[type=url] { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--text); }
+  label.chk { display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line); }
   label.chk:last-child { border-bottom:none; }
-  label.chk input { width:18px; height:18px; }
+  label.chk input { width:22px; height:22px; accent-color:var(--primary); }
   .stat { margin-left:auto; font-size:13px; color:var(--muted); white-space:nowrap; }
-  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
-  .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
-  .seg button { border:none; border-radius:0; flex:1; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); background:#fff; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff; }
+  .seg button { border:none; border-radius:0; flex:1; background:transparent; }
   .seg button.on { background:var(--primary); color:#fff; }
   .stem { white-space:pre-wrap; margin-bottom:12px; }
-  .obj { font-size:13px; color:var(--muted); background:var(--bg); padding:8px 10px; border-radius:8px; margin-bottom:12px; }
-  .opt { display:block; width:100%; text-align:left; margin-bottom:8px; padding:12px 14px; border-radius:10px;
-         border:1px solid var(--line); background:var(--card); white-space:pre-wrap; }
+  .obj { font-size:13px; color:var(--muted); background:var(--bg); padding:8px 10px; border-radius:10px; margin-bottom:12px; }
+  .opt { display:block; width:100%; text-align:left; margin-bottom:8px; padding:12px 14px; border-radius:12px;
+         border:1px solid var(--line); background:#fff; white-space:pre-wrap; }
   .opt.sel { border-color:var(--primary); box-shadow:0 0 0 2px var(--primary) inset; }
   .opt.ok  { border-color:var(--ok); background:var(--okbg); }
   .opt.bad { border-color:var(--bad); background:var(--badbg); }
-  .fb { padding:12px; border-radius:10px; margin-top:8px; }
+  .fb { padding:12px; border-radius:12px; margin-top:8px; font-weight:600; }
   .fb.ok { background:var(--okbg); color:var(--ok); } .fb.bad { background:var(--badbg); color:var(--bad); }
   .progress { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin-bottom:12px; }
   .progress i { display:block; height:100%; background:var(--primary); }
-  .score { font-size:40px; font-weight:700; }
+  .score { font-size:44px; font-weight:800; color:var(--primary); }
   .spin { text-align:center; padding:40px; color:var(--muted); }
   .err { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   td, th { padding:8px 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
-  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .topbar { display:flex; justify-content:space-between; align-items:flex-start; }
+  .star { color:var(--gold); }
+  /* 底部分頁列 */
+  .tabbar { position:fixed; left:0; right:0; bottom:0; background:#ece5cf; border-top:1px solid var(--line);
+            display:flex; justify-content:space-around; padding:6px 0 calc(6px + env(safe-area-inset-bottom)); z-index:10; }
+  .tabbar button { flex:1; border:none; background:none; border-radius:0; padding:4px 0; color:var(--muted); font-size:12px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .tabbar button svg { width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .tabbar button.on { color:var(--primary); font-weight:700; }
 </style>
 </head>
 <body>
 <div class="wrap" id="app"><div class="spin">載入中…</div></div>
+<nav class="tabbar" id="tabbar">
+  <button data-tab="home" onclick="loadHome()"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>首頁</button>
+  <button data-tab="wrong" onclick="startQuiz(true)"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M9 9l6 6M15 9l-6 6"/></svg>錯題</button>
+  <button data-tab="history" onclick="loadHistory()"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 15l3-4 3 2 5-6"/></svg>紀錄</button>
+  <button data-tab="settings" onclick="renderSettings()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>設定</button>
+</nav>
 
 <script>
 // ---------- 設定（存在瀏覽器 localStorage） ----------
@@ -74,7 +90,10 @@ var cfg = loadCfg();
 var state = { meta:null, subject:null, chapters:{}, source:'all', mode:'practice',
               queue:[], idx:0, answers:{}, session:null, onlyWrong:false, pending:[] };
 
-function $(html){ document.getElementById('app').innerHTML = html; window.scrollTo(0,0); }
+var curTab='home';
+function $(html, tab){ document.getElementById('app').innerHTML = html; window.scrollTo(0,0);
+  if (tab) curTab=tab; document.querySelectorAll('#tabbar button').forEach(function(b){ b.classList.toggle('on', b.dataset.tab===curTab); }); }
+function today(){ var d=new Date(), w='日一二三四五六'[d.getDay()]; return (d.getMonth()+1)+'/'+d.getDate()+'（'+w+'）'; }
 function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
 // ---------- API ----------
@@ -107,7 +126,7 @@ function renderSettings(msg){
    +(msg?'<div class="muted err">'+esc(msg)+'</div>':'')
    +'</div>'
    +'<button class="primary wide" onclick="saveSettings()">儲存並連線</button>'
-   +(cfg.apiUrl?'<button class="wide" onclick="loadHome()">返回</button>':''));
+   +(cfg.apiUrl?'<button class="wide" onclick="loadHome()">返回</button>':''),'settings');
 }
 function saveSettings(){
   cfg = { apiUrl: document.getElementById('apiUrl').value.trim(), token: document.getElementById('token').value.trim() };
@@ -132,19 +151,23 @@ function curSubject(){ return state.meta.subjects.filter(function(s){return s.na
 
 function renderHome(){
   var m = state.meta;
-  var h = '<div class="topbar"><h1 style="margin:0">測驗平台</h1><button class="link" onclick="renderSettings()">設定</button></div>';
-  if (!m.subjects.length){ $(h+'<div class="card">題庫是空的，請先在「題庫」工作表新增題目。</div>'); return; }
+  var h = '<h1>測驗平台</h1><div class="sub">'+today()+' · 更新於 '+('0'+new Date().getHours()).slice(-2)+':'+('0'+new Date().getMinutes()).slice(-2)+'</div>';
+  if (!m.subjects.length){ $(h+'<div class="card">題庫是空的，請先在「題庫」工作表新增題目。</div>','home'); return; }
   var s = curSubject();
-  h += '<div class="card"><div class="muted">科目</div><div class="row" style="margin-top:6px">';
+  var answered = s.chapters.reduce(function(a,c){ return a+c.answered; },0);
+  h += '<div class="row" style="margin-bottom:10px">';
   m.subjects.forEach(function(x){ h += '<button class="'+(x.name===state.subject?'primary':'')+'" onclick="pickSubject(\''+esc(x.name)+'\')">'+esc(x.name)+'</button>'; });
-  h += '</div><div class="muted" style="margin-top:8px">共 '+s.total+' 題 · 目前錯題 '+s.wrong+' 題 · 累計作答 '+m.totalAnswered+' 次</div></div>';
+  h += '</div>';
+  h += '<div class="kpis"><div class="kpi"><div class="l">總題數</div><div class="v">'+s.total+'</div></div>'
+     + '<div class="kpi"><div class="l">已作答</div><div class="v">'+answered+' <small>/ '+s.total+'</small></div></div>'
+     + '<div class="kpi"><div class="l">目前錯題</div><div class="v" style="color:var(--bad)">'+s.wrong+'</div></div></div>';
 
   h += '<div class="card"><div class="row" style="justify-content:space-between"><b>選擇章節</b>'
      + '<span><button onclick="selAll(true)">全選</button> <button onclick="selAll(false)">清除</button></span></div>';
   s.chapters.forEach(function(c){
     var rate = c.answered ? Math.round(100*c.correct/c.answered)+'%' : '未作答';
     h += '<label class="chk"><input type="checkbox" '+(state.chapters[c.chapter]?'checked':'')+' onchange="toggleCh('+c.chapter+',this.checked)">'
-       + '<span>第 '+c.chapter+' 章 <span class="pill">練習 '+c.practice+'</span> <span class="pill">模擬 '+c.mock+'</span></span>'
+       + '<span><span class="star">★</span> 第 '+c.chapter+' 章 <span class="pill">練習 '+c.practice+'</span> <span class="pill">模擬 '+c.mock+'</span></span>'
        + '<span class="stat">'+rate+(c.wrong?' · 錯 '+c.wrong:'')+'</span></label>';
   });
   h += '</div>';
@@ -158,7 +181,7 @@ function renderHome(){
   h += '<button class="primary wide" '+(n?'':'disabled')+' onclick="startQuiz(false)">開始（'+n+' 章）</button>'
      + '<button class="wide" '+(s.wrong?'':'disabled')+' onclick="startQuiz(true)">只重練錯題（'+s.wrong+' 題，不限章節）</button>'
      + '<button class="wide" onclick="loadHistory()">作答紀錄</button>';
-  $(h);
+  $(h,'home');
 }
 function segBtn(key,val,label){ return '<button class="'+(state[key]===val?'on':'')+'" onclick="state.'+key+'=\''+val+'\';renderHome()">'+label+'</button>'; }
 function pickSubject(n){ state.subject=n; state.chapters={}; renderHome(); }
@@ -175,6 +198,7 @@ function startQuiz(onlyWrong){
   .then(function(qs){
     if (!qs.length){ $('<div class="card">沒有符合條件的題目。</div><button class="wide" onclick="renderHome()">回首頁</button>'); return; }
     state.queue=qs; state.idx=0; state.answers={}; state.session=newSession();
+    curTab = onlyWrong?'wrong':'home';
     renderQ();
   }).catch(fail);
 }
@@ -264,7 +288,7 @@ function loadHistory(){
       h += '</table></div>';
     }
     h += '<button class="wide" onclick="renderHome()">回首頁</button>';
-    $(h);
+    $(h,'history');
   }).catch(fail);
 }
 
