@@ -10,9 +10,9 @@
  *   GET  ?token=…&action=meta
  *   GET  ?token=…&action=questions&subject=…&chapters=1,2&source=all|練習題|模擬試題&onlyWrong=0|1
  *   GET  ?token=…&action=history&subject=…
+ *   GET  ?token=…&action=sessionDetail&subject=…&session=…
  *   POST body(JSON): { token, action:'answer',  rec:{…} }
  *   POST body(JSON): { token, action:'answers', recs:[{…}] }
- *   POST body(JSON): { token, action:'deleteSession', subject, session }
  */
 
 var SHEET_BANK = '題庫';
@@ -94,6 +94,8 @@ function handle_(p, body) {
         }); break;
       case 'history':
         data = getHistory(p.subject); break;
+      case 'sessionDetail':
+        data = getSessionDetail(p.subject, p.session); break;
       case 'answer':
         data = saveAnswers([body.rec]); break;
       case 'answers':
@@ -278,6 +280,25 @@ function deleteSession(subject, session) {
   });
   rows.reverse().forEach(function (row) { sh.deleteRow(row); });
   return { deleted: rows.length };
+}
+
+/** 某一場次的逐題明細：題目、選項、我的答案、正確答案、對錯、教材頁碼（依作答順序） */
+function getSessionDetail(subject, session) {
+  if (!session) throw new Error('缺少場次');
+  var bank = {};
+  readBank_().forEach(function (q) { bank[q.subject + '|' + q.id] = q; });
+  var items = readLog_().filter(function (l) {
+    return String(l.session) === String(session) && (!subject || l.subject === subject);
+  }).sort(function (a, b) { return a.time - b.time; }).map(function (l) {
+    var q = bank[l.subject + '|' + l.id] || {};
+    return {
+      id: l.id, chapter: l.chapter, source: l.source, mode: l.mode, time: l.time,
+      chosen: l.chosen, answer: l.answer, correct: l.correct,
+      stem: q.stem || '（題目已不在題庫中）', options: q.options || [], page: q.page || '', objective: q.objective || ''
+    };
+  });
+  return { session: String(session), total: items.length,
+    correct: items.filter(function (i) { return i.correct; }).length, items: items };
 }
 
 /** 某科目的歷次場次摘要（最近 20 場） */
