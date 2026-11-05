@@ -72,14 +72,29 @@
   .tabbar button svg { width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   .tabbar button.on { color:var(--primary); font-weight:700; }
   .timer { font-weight:700; font-variant-numeric:tabular-nums; } .timer.low { color:var(--bad); }
+  /* 教材關鍵句與整頁原文 */
+  .keys { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; }
+  .keys .t { font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .key { background:#fff6d6; border-left:4px solid var(--gold); border-radius:8px; padding:8px 10px; margin-bottom:6px; font-size:15px; line-height:1.6; }
+  .key .pg { color:var(--muted); font-size:12px; margin-left:4px; white-space:nowrap; }
+  mark { background:#ffe28a; color:inherit; padding:0 2px; border-radius:3px; }
+  .ovl { position:fixed; inset:0; background:var(--bg); z-index:20; overflow:auto; -webkit-overflow-scrolling:touch; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); display:none; }
+  .ovl.on { display:block; }
+  .ovl .bar { position:sticky; top:0; background:var(--bg); padding:6px 0 10px; display:flex; justify-content:space-between; align-items:center; gap:8px; z-index:1; }
+  .ovl .page { white-space:pre-wrap; line-height:1.9; font-size:16px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:var(--shadow); max-width:720px; margin:0 auto; }
+  .ovl .nav { display:flex; justify-content:space-between; max-width:720px; margin:12px auto 0; }
+  .sr { display:flex; gap:8px; } .sr input { flex:1; }
+  .hit { cursor:pointer; } .hit .sn { font-size:14px; color:var(--text); margin-top:4px; }
 </style>
 </head>
 <body>
 <div class="wrap" id="app"><div class="spin">載入中…</div></div>
+<div class="ovl" id="ovl"></div>
 <nav class="tabbar" id="tabbar">
   <button data-tab="home" onclick="loadHome()"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>首頁</button>
   <button data-tab="wrong" onclick="startQuiz(true)"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M9 9l6 6M15 9l-6 6"/></svg>錯題</button>
   <button data-tab="history" onclick="loadHistory()"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 15l3-4 3 2 5-6"/></svg>紀錄</button>
+  <button data-tab="book" onclick="renderSearch()"><svg viewBox="0 0 24 24"><path d="M4 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4z"/><path d="M20 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/></svg>教材</button>
   <button data-tab="settings" onclick="renderSettings()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>設定</button>
 </nav>
 
@@ -260,7 +275,7 @@ function renderQ(){
   if (reveal){
     var shown = perm.indexOf(q.answer-1)+1;
     h += '<div class="fb '+(a===q.answer?'ok':'bad')+'">'+(a===q.answer?'答對了':'答錯了，正確答案是（'+shown+'）')+'</div>';
-    h += '<div class="muted" style="margin-top:8px">教材出處：'+esc(q.page)+'</div>';
+    h += keysHtml(q.keys, q.page);
   }
   h += '</div>';
   h += '<div class="row" style="justify-content:space-between">';
@@ -308,12 +323,12 @@ function renderResult(partial){
   if (wrong.length){
     h += '<h2>答錯的題目</h2>';
     wrong.forEach(function(q){
-      h += '<div class="card"><div class="muted">'+esc(q.id)+' · 第 '+q.chapter+' 章 · 教材出處 '+esc(q.page)+'</div>'
+      h += '<div class="card"><div class="muted">'+esc(q.id)+' · 第 '+q.chapter+' 章</div>'
          + '<div class="stem" style="margin:6px 0">'+esc(q.stem)+'</div>';
       var perm = q.perm || q.options.map(function(_,i){ return i; });
       perm.forEach(function(oi,i){ var n=oi+1; var cls = n===q.answer?'ok':(n===state.answers[q.id]?'bad':'');
         h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+(i+1)+'）'+esc(q.options[oi])+'</div>'; });
-      h += '</div>';
+      h += keysHtml(q.keys, q.page) + '</div>';
     });
     h += '<button class="primary wide" onclick="retryWrong()">重練這些錯題</button>';
   } else if (total) {
@@ -373,7 +388,7 @@ function showSession(session){
       it.options.forEach(function(o,i){ var k=i+1, cls = k===it.answer?'ok':(k===it.chosen?'bad':'');
         var tag = k===it.answer ? '　✓ 正確答案' : (k===it.chosen ? '　✗ 我的答案' : '');
         h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+k+'）'+esc(o)+'<span class="muted" style="font-size:12px">'+tag+'</span></div>'; });
-      h += '<div class="muted" style="margin-top:6px">教材出處：'+esc(it.page)+'</div></div>';
+      h += keysHtml(it.keys, it.page) + '</div>';
     });
     h += '<button class="wide" onclick="loadHistory()">回作答紀錄</button>';
     window._detail = d;
@@ -383,11 +398,80 @@ function showSession(session){
 function retrySession(){
   var d = window._detail; if (!d) return;
   var qs = d.items.filter(function(i){ return !i.correct; }).map(function(i){
-    return { id:i.id, subject:state.subject, chapter:i.chapter, source:i.source, objective:i.objective, stem:i.stem, options:i.options, answer:i.answer, page:i.page };
+    return { id:i.id, subject:state.subject, chapter:i.chapter, source:i.source, objective:i.objective, stem:i.stem, options:i.options, answer:i.answer, page:i.page, keys:i.keys };
   });
   state.mock=false; state.mode='practice'; state.onlyWrong=true;
   state.queue=prepare(qs); state.idx=0; state.answers={}; state.session=newSession();
   curTab='wrong'; renderQ();
+}
+
+// ---------- 教材：關鍵句、整頁原文、搜尋 ----------
+// 關鍵句區塊（題目揭曉、結果頁、場次明細共用）。keys = [{page,text}]
+function keysHtml(keys, pageRef){
+  var h = '<div class="keys"><div class="t">教材原文（支撐答案的句子，底色為標記處）</div>';
+  if (keys && keys.length){
+    keys.forEach(function(k){
+      var id = (window._K = window._K || []).push([k.text]) - 1;
+      h += '<div class="key">'+esc(k.text)+' <span class="pg">p.'+k.page+'</span>'
+         + ' <button class="link" style="padding:0 4px;font-size:13px" onclick="openPage('+k.page+',window._hl=window._K['+id+'])">看整頁 ›</button></div>';
+    });
+  } else {
+    h += '<div class="muted">這題尚未標記關鍵句。</div>';
+  }
+  var pages = parsePages(pageRef);
+  if (pages.length) h += '<div class="muted" style="margin-top:4px">教材出處（點頁碼看整頁）：'
+    + pages.map(function(p){ return '<button class="link" style="padding:0 4px;font-size:13px" onclick="openPage('+p+',window._hl=[])">p.'+p+'</button>'; }).join('')+'</div>';
+  return h + '</div>';
+}
+function parsePages(ref){
+  var out = []; String(ref||'').replace(/p+\./g,'').split(/[,;]/).forEach(function(part){
+    part = part.trim(); if (!/^\d/.test(part)) return;
+    if (part.indexOf('-')>0){ var a=part.split('-'); for (var i=+a[0]; i<=+a[1]; i++) out.push(i); } else out.push(+part);
+  }); return out;
+}
+function hlText(text, hls){
+  var h = esc(text);
+  (hls||[]).filter(Boolean).forEach(function(t){ var e = esc(t); if (e) h = h.split(e).join('<mark>'+e+'</mark>'); });
+  return h;
+}
+// 整頁原文覆蓋層；hl = 要標記的字串陣列
+function openPage(page, hl){
+  var o = document.getElementById('ovl'); o.className='ovl on';
+  o.innerHTML = '<div class="bar"><button onclick="closePage()">‹ 返回</button><b>教材 p.'+page+'</b><span></span></div><div class="spin">載入中…</div>';
+  apiGet('page', { subject: state.subject, page: page }).then(function(d){
+    var title = (d.chapter?'第 '+d.chapter+' 章 · ':'')+'p.'+d.page+(d.alias?'（第 '+d.requested+' 頁無獨立內文，顯示 p.'+d.page+'）':'');
+    o.innerHTML = '<div class="bar"><button onclick="closePage()">‹ 返回</button><b>'+esc(title)+'</b><span></span></div>'
+      + '<div class="page">'+hlText(d.text, hl)+'</div>'
+      + '<div class="nav"><button '+(d.prev?'':'disabled')+' onclick="openPage('+d.prev+',window._hl)">‹ p.'+(d.prev||'')+'</button>'
+      + '<button '+(d.next?'':'disabled')+' onclick="openPage('+d.next+',window._hl)">p.'+(d.next||'')+' ›</button></div>';
+    o.scrollTop = 0;
+    var m = o.querySelector('mark'); if (m) setTimeout(function(){ m.scrollIntoView({ block:'center' }); }, 50);
+  }).catch(function(e){ o.innerHTML = '<div class="bar"><button onclick="closePage()">‹ 返回</button></div><div class="card err">'+esc(e.message||e)+'</div>'; });
+}
+function closePage(){ var o=document.getElementById('ovl'); o.className='ovl'; o.innerHTML=''; }
+
+// 查教材
+function renderSearch(q, data){
+  var h = '<h1>查教材 · '+esc(state.subject||'')+'</h1><div class="sub">輸入關鍵字，找出教材裡出現的頁面（多個字以空格分開表示都要出現）</div>'
+        + '<div class="card"><div class="sr"><input type="text" id="sq" placeholder="例如：逆選擇、可保利益" value="'+esc(q||'')+'" onkeydown="if(event.key===\'Enter\')doSearch()"><button class="primary" onclick="doSearch()">搜尋</button></div></div>';
+  if (data){
+    h += '<div class="muted" style="margin:4px 0 8px">找到 '+data.total+' 頁'+(data.total>50?'（只顯示前 50 頁）':'')+'</div>';
+    if (!data.results.length) h += '<div class="card muted">沒有找到「'+esc(data.q)+'」</div>';
+    window._SQ = data.q.split(/\s+/);
+    data.results.forEach(function(r){
+      h += '<div class="card hit" onclick="openPage('+r.page+',window._hl=window._SQ)">'
+         + '<div class="row" style="justify-content:space-between"><b>p.'+r.page+'</b><span class="muted">'+(r.chapter?'第 '+r.chapter+' 章 · ':'')+'出現 '+r.count+' 次</span></div>'
+         + '<div class="sn">'+hlText(r.snippet, [data.q.split(/\s+/)[0]])+'</div></div>';
+    });
+  }
+  $(h,'book');
+  if (!data){ var el=document.getElementById('sq'); if (el && !q) el.focus(); }
+}
+function doSearch(){
+  var q = (document.getElementById('sq').value||'').trim();
+  if (q.length < 2) return;
+  $('<div class="spin">搜尋中…</div>','book');
+  apiGet('search', { subject: state.subject, q: q }).then(function(d){ renderSearch(q, d); }).catch(function(e){ renderSearch(q, { q:q, total:0, results:[] }); alert(e.message||e); });
 }
 
 // ---------- PWA ----------
