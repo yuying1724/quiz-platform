@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="測驗平台">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>測驗平台</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1f2328; --muted:#6b7280; --line:#e5e7eb;
+          --primary:#2563eb; --ok:#16a34a; --okbg:#ecfdf5; --bad:#dc2626; --badbg:#fef2f2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --card:#1b2026; --text:#e6e8eb; --muted:#9aa3ad; --line:#2d3540;
+            --primary:#3b82f6; --ok:#22c55e; --okbg:#0f2a1c; --bad:#ef4444; --badbg:#2a1414; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;
+         padding-bottom:env(safe-area-inset-bottom); }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  h2 { font-size:17px; margin:16px 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text);
+           padding:10px 14px; border-radius:10px; cursor:pointer; }
+  button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+  button.link { border:none; background:none; color:var(--primary); padding:4px 6px; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.wide { width:100%; margin-top:8px; }
+  input[type=text], input[type=url] { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--text); }
+  label.chk { display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line); }
+  label.chk:last-child { border-bottom:none; }
+  label.chk input { width:18px; height:18px; }
+  .stat { margin-left:auto; font-size:13px; color:var(--muted); white-space:nowrap; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg button { border:none; border-radius:0; flex:1; }
+  .seg button.on { background:var(--primary); color:#fff; }
+  .stem { white-space:pre-wrap; margin-bottom:12px; }
+  .obj { font-size:13px; color:var(--muted); background:var(--bg); padding:8px 10px; border-radius:8px; margin-bottom:12px; }
+  .opt { display:block; width:100%; text-align:left; margin-bottom:8px; padding:12px 14px; border-radius:10px;
+         border:1px solid var(--line); background:var(--card); white-space:pre-wrap; }
+  .opt.sel { border-color:var(--primary); box-shadow:0 0 0 2px var(--primary) inset; }
+  .opt.ok  { border-color:var(--ok); background:var(--okbg); }
+  .opt.bad { border-color:var(--bad); background:var(--badbg); }
+  .fb { padding:12px; border-radius:10px; margin-top:8px; }
+  .fb.ok { background:var(--okbg); color:var(--ok); } .fb.bad { background:var(--badbg); color:var(--bad); }
+  .progress { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin-bottom:12px; }
+  .progress i { display:block; height:100%; background:var(--primary); }
+  .score { font-size:40px; font-weight:700; }
+  .spin { text-align:center; padding:40px; color:var(--muted); }
+  .err { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { padding:8px 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="spin">載入中…</div></div>
+
+<script>
+// ---------- 設定（存在瀏覽器 localStorage） ----------
+var CFG_KEY = 'quiz-platform.config';
+function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); } catch(e){ return {}; } }
+function saveCfg(c){ try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){} }
+var cfg = loadCfg();
+
+var state = { meta:null, subject:null, chapters:{}, source:'all', mode:'practice',
+              queue:[], idx:0, answers:{}, session:null, onlyWrong:false, pending:[] };
+
+function $(html){ document.getElementById('app').innerHTML = html; window.scrollTo(0,0); }
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+// ---------- API ----------
+function apiGet(action, params){
+  var q = Object.assign({ token: cfg.token, action: action }, params||{});
+  var qs = Object.keys(q).filter(function(k){ return q[k]!==undefined && q[k]!==null && q[k]!==''; })
+             .map(function(k){ return encodeURIComponent(k)+'='+encodeURIComponent(q[k]); }).join('&');
+  return fetch(cfg.apiUrl+'?'+qs, { method:'GET', redirect:'follow' }).then(parse_);
+}
+function apiPost(action, payload){
+  var body = Object.assign({ token: cfg.token, action: action }, payload||{});
+  // text/plain 避免 CORS 預檢，Apps Script 端用 JSON.parse 讀
+  return fetch(cfg.apiUrl, { method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) }).then(parse_);
+}
+function parse_(r){
+  return r.text().then(function(t){
+    var j; try { j = JSON.parse(t); } catch(e){ throw new Error('API 回傳的不是 JSON，請確認網址正確且部署為「任何人」可存取。'); }
+    if (!j.ok) throw new Error(j.error || 'API 錯誤');
+    return j.data;
+  });
+}
+function fail(e){ $('<div class="card err">發生錯誤：'+esc(e && e.message || e)+'</div><button class="wide" onclick="loadHome()">重試</button><button class="wide" onclick="renderSettings()">設定</button>'); }
+
+// ---------- 設定頁 ----------
+function renderSettings(msg){
+  $('<h1>設定</h1>'
+   +'<div class="card"><div class="muted">第一次使用請填入 Apps Script 網頁應用程式網址與 API Token（只存在這台裝置的瀏覽器）。</div>'
+   +'<p><b>API 網址</b><br><input type="url" id="apiUrl" placeholder="https://script.google.com/macros/s/…/exec" value="'+esc(cfg.apiUrl||'')+'"></p>'
+   +'<p><b>API Token</b><br><input type="text" id="token" placeholder="執行 generateToken() 取得" value="'+esc(cfg.token||'')+'"></p>'
+   +(msg?'<div class="muted err">'+esc(msg)+'</div>':'')
+   +'</div>'
+   +'<button class="primary wide" onclick="saveSettings()">儲存並連線</button>'
+   +(cfg.apiUrl?'<button class="wide" onclick="loadHome()">返回</button>':''));
+}
+function saveSettings(){
+  cfg = { apiUrl: document.getElementById('apiUrl').value.trim(), token: document.getElementById('token').value.trim() };
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(cfg.apiUrl)) return renderSettings('網址格式不對，應該是 https://script.google.com/macros/s/…/exec');
+  if (!cfg.token) return renderSettings('請填入 Token');
+  saveCfg(cfg);
+  $('<div class="spin">連線測試中…</div>');
+  apiGet('ping').then(loadHome).catch(function(e){ renderSettings('連線失敗：'+(e.message||e)); });
+}
+
+// ---------- 首頁 ----------
+function loadHome(){
+  if (!cfg.apiUrl || !cfg.token) return renderSettings();
+  $('<div class="spin">載入中…</div>');
+  apiGet('meta').then(function(m){
+    state.meta = m;
+    if (!state.subject || !m.subjects.some(function(s){return s.name===state.subject;})) state.subject = m.subjects.length ? m.subjects[0].name : null;
+    renderHome();
+  }).catch(fail);
+}
+function curSubject(){ return state.meta.subjects.filter(function(s){return s.name===state.subject;})[0]; }
+
+function renderHome(){
+  var m = state.meta;
+  var h = '<div class="topbar"><h1 style="margin:0">測驗平台</h1><button class="link" onclick="renderSettings()">設定</button></div>';
+  if (!m.subjects.length){ $(h+'<div class="card">題庫是空的，請先在「題庫」工作表新增題目。</div>'); return; }
+  var s = curSubject();
+  h += '<div class="card"><div class="muted">科目</div><div class="row" style="margin-top:6px">';
+  m.subjects.forEach(function(x){ h += '<button class="'+(x.name===state.subject?'primary':'')+'" onclick="pickSubject(\''+esc(x.name)+'\')">'+esc(x.name)+'</button>'; });
+  h += '</div><div class="muted" style="margin-top:8px">共 '+s.total+' 題 · 目前錯題 '+s.wrong+' 題 · 累計作答 '+m.totalAnswered+' 次</div></div>';
+
+  h += '<div class="card"><div class="row" style="justify-content:space-between"><b>選擇章節</b>'
+     + '<span><button onclick="selAll(true)">全選</button> <button onclick="selAll(false)">清除</button></span></div>';
+  s.chapters.forEach(function(c){
+    var rate = c.answered ? Math.round(100*c.correct/c.answered)+'%' : '未作答';
+    h += '<label class="chk"><input type="checkbox" '+(state.chapters[c.chapter]?'checked':'')+' onchange="toggleCh('+c.chapter+',this.checked)">'
+       + '<span>第 '+c.chapter+' 章 <span class="pill">練習 '+c.practice+'</span> <span class="pill">模擬 '+c.mock+'</span></span>'
+       + '<span class="stat">'+rate+(c.wrong?' · 錯 '+c.wrong:'')+'</span></label>';
+  });
+  h += '</div>';
+
+  h += '<div class="card"><b>題目來源</b><div class="seg" style="margin:8px 0 14px">'
+     + segBtn('source','all','全部') + segBtn('source','練習題','練習題') + segBtn('source','模擬試題','模擬試題') + '</div>'
+     + '<b>模式</b><div class="seg" style="margin:8px 0 4px">'
+     + segBtn('mode','practice','練習：每題立即看答案') + segBtn('mode','exam','測驗：全部答完再對答案') + '</div></div>';
+
+  var n = selectedChapters().length;
+  h += '<button class="primary wide" '+(n?'':'disabled')+' onclick="startQuiz(false)">開始（'+n+' 章）</button>'
+     + '<button class="wide" '+(s.wrong?'':'disabled')+' onclick="startQuiz(true)">只重練錯題（'+s.wrong+' 題，不限章節）</button>'
+     + '<button class="wide" onclick="loadHistory()">作答紀錄</button>';
+  $(h);
+}
+function segBtn(key,val,label){ return '<button class="'+(state[key]===val?'on':'')+'" onclick="state.'+key+'=\''+val+'\';renderHome()">'+label+'</button>'; }
+function pickSubject(n){ state.subject=n; state.chapters={}; renderHome(); }
+function toggleCh(c,on){ state.chapters[c]=on; renderHome(); }
+function selAll(on){ curSubject().chapters.forEach(function(c){ state.chapters[c.chapter]=on; }); renderHome(); }
+function selectedChapters(){ return Object.keys(state.chapters).filter(function(k){return state.chapters[k];}).map(Number); }
+
+// ---------- 測驗 ----------
+function newSession(){ return new Date().toISOString().replace(/[-:T]/g,'').slice(0,14); }
+function startQuiz(onlyWrong){
+  state.onlyWrong = onlyWrong;
+  $('<div class="spin">出題中…</div>');
+  apiGet('questions', { subject:state.subject, chapters: onlyWrong?'':selectedChapters().join(','), source: onlyWrong?'all':state.source, onlyWrong: onlyWrong?1:0 })
+  .then(function(qs){
+    if (!qs.length){ $('<div class="card">沒有符合條件的題目。</div><button class="wide" onclick="renderHome()">回首頁</button>'); return; }
+    state.queue=qs; state.idx=0; state.answers={}; state.session=newSession();
+    renderQ();
+  }).catch(fail);
+}
+
+function renderQ(){
+  var q = state.queue[state.idx], a = state.answers[q.id];
+  var reveal = (state.mode==='practice' && a!==undefined);
+  var h = '<div class="muted row" style="justify-content:space-between"><span>'+esc(state.subject)+' · 第 '+q.chapter+' 章 · '+esc(q.source)+' '+esc(q.id)+'</span><span>'+(state.idx+1)+' / '+state.queue.length+'</span></div>';
+  h += '<div class="progress"><i style="width:'+Math.round(100*(state.idx)/state.queue.length)+'%"></i></div>';
+  h += '<div class="card">';
+  if (q.objective) h += '<div class="obj">學習目標：'+esc(q.objective)+'</div>';
+  h += '<div class="stem">'+esc(q.stem)+'</div>';
+  q.options.forEach(function(o,i){
+    var n=i+1, cls='opt';
+    if (reveal){ if(n===q.answer) cls+=' ok'; else if(n===a) cls+=' bad'; }
+    else if (a===n) cls+=' sel';
+    h += '<button class="'+cls+'" '+(reveal?'disabled':'')+' onclick="choose('+n+')">（'+n+'）'+esc(o)+'</button>';
+  });
+  if (reveal){
+    h += '<div class="fb '+(a===q.answer?'ok':'bad')+'">'+(a===q.answer?'答對了':'答錯了，正確答案是（'+q.answer+'）')+'</div>';
+    h += '<div class="muted" style="margin-top:8px">教材出處：'+esc(q.page)+'</div>';
+  }
+  h += '</div>';
+  h += '<div class="row" style="justify-content:space-between">';
+  h += '<button onclick="prevQ()" '+(state.idx===0?'disabled':'')+'>上一題</button>';
+  if (state.idx < state.queue.length-1) h += '<button class="primary" onclick="nextQ()" '+(a===undefined?'disabled':'')+'>下一題</button>';
+  else h += '<button class="primary" onclick="finish()" '+(a===undefined?'disabled':'')+'>完成</button>';
+  h += '</div><div style="text-align:center;margin-top:12px"><button onclick="confirmQuit()">結束測驗</button></div>';
+  $(h);
+}
+function rec(q,n){ return { session:state.session, subject:q.subject, chapter:q.chapter, id:q.id, source:q.source, chosen:n, answer:q.answer, mode: state.mode==='practice'?'練習':'測驗' }; }
+function choose(n){
+  var q = state.queue[state.idx];
+  if (state.mode==='practice' && state.answers[q.id]!==undefined) return;
+  state.answers[q.id]=n;
+  if (state.mode==='practice') apiPost('answer', { rec: rec(q,n) }).catch(function(e){ console.error(e); });
+  renderQ();
+}
+function nextQ(){ if (state.idx<state.queue.length-1){ state.idx++; renderQ(); } }
+function prevQ(){ if (state.idx>0){ state.idx--; renderQ(); } }
+function confirmQuit(){ if (confirm('確定結束？已作答的題目會保留紀錄。')) { if (state.mode==='exam') finish(true); else loadHome(); } }
+
+function finish(partial){
+  if (state.mode==='exam'){
+    var recs = state.queue.filter(function(q){ return state.answers[q.id]!==undefined; }).map(function(q){ return rec(q, state.answers[q.id]); });
+    if (recs.length) apiPost('answers', { recs: recs }).catch(function(e){ alert('成績儲存失敗：'+e.message); });
+  }
+  renderResult(partial);
+}
+
+function renderResult(partial){
+  var total=0, correct=0, wrong=[];
+  state.queue.forEach(function(q){ var a=state.answers[q.id]; if(a===undefined) return; total++; if(a===q.answer) correct++; else wrong.push(q); });
+  var pct = total?Math.round(100*correct/total):0;
+  var h = '<h1>結果</h1><div class="card" style="text-align:center"><div class="score">'+pct+'%</div>'
+        + '<div class="muted">'+correct+' / '+total+' 題正確'+(partial?'（未全部作答）':'')+(state.queue.length>=75?' · 正式考試 70 分及格':'')+'</div></div>';
+  if (wrong.length){
+    h += '<h2>答錯的題目</h2>';
+    wrong.forEach(function(q){
+      h += '<div class="card"><div class="muted">'+esc(q.id)+' · 第 '+q.chapter+' 章 · 教材出處 '+esc(q.page)+'</div>'
+         + '<div class="stem" style="margin:6px 0">'+esc(q.stem)+'</div>';
+      q.options.forEach(function(o,i){ var n=i+1; var cls = n===q.answer?'ok':(n===state.answers[q.id]?'bad':'');
+        h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+n+'）'+esc(o)+'</div>'; });
+      h += '</div>';
+    });
+    h += '<button class="primary wide" onclick="retryWrong()">重練這些錯題</button>';
+  } else if (total) {
+    h += '<div class="card" style="color:var(--ok)">全部答對！</div>';
+  }
+  h += '<button class="wide" onclick="loadHome()">回首頁</button>';
+  $(h);
+  window._wrong = wrong;
+}
+function retryWrong(){ state.queue = window._wrong; state.idx=0; state.answers={}; state.session=newSession(); renderQ(); }
+
+// ---------- 紀錄 ----------
+function loadHistory(){
+  $('<div class="spin">載入中…</div>');
+  apiGet('history', { subject: state.subject }).then(function(rows){
+    var h = '<h1>作答紀錄 · '+esc(state.subject)+'</h1>';
+    if (!rows.length) h += '<div class="card muted">尚無紀錄</div>';
+    else {
+      h += '<div class="card"><table><tr><th>時間</th><th>章節</th><th>模式</th><th>成績</th></tr>';
+      rows.forEach(function(r){ var d=new Date(r.time);
+        h += '<tr><td>'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+'</td>'
+           + '<td>'+r.chapters.join(', ')+'</td><td>'+esc(r.mode)+'</td><td>'+r.correct+'/'+r.total+'（'+Math.round(100*r.correct/r.total)+'%）</td></tr>'; });
+      h += '</table></div>';
+    }
+    h += '<button class="wide" onclick="renderHome()">回首頁</button>';
+    $(h);
+  }).catch(fail);
+}
+
+// ---------- PWA ----------
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(function(){}); }
+
+loadHome();
+</script>
+</body>
+</html>
