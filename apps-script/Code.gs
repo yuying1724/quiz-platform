@@ -11,15 +11,21 @@
  *   GET  ?token=…&action=questions&subject=…&chapters=1,2&source=all|練習題|模擬試題&onlyWrong=0|1
  *   GET  ?token=…&action=history&subject=…
  *   GET  ?token=…&action=sessionDetail&subject=…&session=…
+ *   GET  ?token=…&action=page&subject=…&page=12        （教材單頁原文）
+ *   GET  ?token=…&action=search&subject=…&q=關鍵字      （教材全文搜尋）
+ *   POST body(JSON): { token, action:'importPages', rows:[[科目,頁碼,章節,原文],…] }
+ *   POST body(JSON): { token, action:'setKeys', items:[{id, keys:[{page,text}]},…] }
  *   POST body(JSON): { token, action:'answer',  rec:{…} }
  *   POST body(JSON): { token, action:'answers', recs:[{…}] }
  */
 
 var SHEET_BANK = '題庫';
 var SHEET_LOG = '作答紀錄';
+var SHEET_TEXT = '教材';
 
 var BANK_COLS = ['題號', '科目', '來源', '章節', '學習目標', '題目',
-  '選項1', '選項2', '選項3', '選項4', '選項5', '答案', '教材頁碼', '啟用'];
+  '選項1', '選項2', '選項3', '選項4', '選項5', '答案', '教材頁碼', '啟用', '關鍵句'];
+var TEXT_COLS = ['科目', '頁碼', '章節', '原文'];
 var LOG_COLS = ['時間', '場次', '科目', '章節', '題號', '來源', '我的答案', '正確答案', '是否正確', '模式'];
 
 // ---------- 一次性設定 ----------
@@ -96,6 +102,14 @@ function handle_(p, body) {
         data = getHistory(p.subject); break;
       case 'sessionDetail':
         data = getSessionDetail(p.subject, p.session); break;
+      case 'page':
+        data = getPage(p.subject, p.page); break;
+      case 'search':
+        data = searchText(p.subject, p.q); break;
+      case 'importPages':
+        data = importPages(body.rows || []); break;
+      case 'setKeys':
+        data = setKeys(body.items || []); break;
       case 'answer':
         data = saveAnswers([body.rec]); break;
       case 'answers':
@@ -146,7 +160,8 @@ function readBank_() {
         options: options,
         answer: Number(r[idx['答案']]),
         page: String(r[idx['教材頁碼']] || ''),
-        enabled: String(r[idx['啟用']] || 'Y').toUpperCase() !== 'N'
+        enabled: String(r[idx['啟用']] || 'Y').toUpperCase() !== 'N',
+        keys: parseKeys_(idx['關鍵句'] !== undefined ? r[idx['關鍵句']] : '')
       };
     })
     .filter(function (q) { return q.enabled; });
@@ -256,11 +271,12 @@ function importQuestions(rows) {
   }
   var toAdd = [], skipped = [];
   rows.forEach(function (r) {
-    if (!r || r.length < BANK_COLS.length) return;
+    if (!r || r.length < 14) return;
     var id = String(r[0]).trim();
     if (!id || existing[id]) { skipped.push(id); return; }
     existing[id] = true;
     var row = r.slice(0, BANK_COLS.length).map(function (v) { return v === null || v === undefined ? '' : v; });
+    while (row.length < BANK_COLS.length) row.push('');
     row[3] = Number(row[3]); row[11] = Number(row[11]);
     toAdd.push(row);
   });
@@ -282,6 +298,106 @@ function deleteSession(subject, session) {
   return { deleted: rows.length };
 }
 
+// ---------- 教材原文 ----------
+
+function parseKeys_(v) {
+  if (!v) return [];
+  try { var a = JSON.parse(String(v)); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+
+function textSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_TEXT);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_TEXT);
+    sh.getRange(1, 1, 1, TEXT_COLS.length).setValues([TEXT_COLS]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+/** 讀整本教材：[{subject,page,chapter,text}] */
+function readText_(subject) {
+  var sh = textSheet_();
+  if (sh.getLastRow() < 2) return [];
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, TEXT_COLS.length).getValues();
+  return values.filter(function (r) { return r[1] !== '' && (!subject || String(r[0]) === String(subject)); })
+    .map(function (r) { return { subject: String(r[0]), page: Number(r[1]), chapter: Number(r[2]) || null, text: String(r[3]) }; });
+}
+
+/** 取單頁原文（頁碼可為字串或數字；找不到該頁時回傳最接近的前一頁並標 alias） */
+function getPage(subject, page) {
+  var n = Number(page);
+  if (!n) throw new Error('缺少頁碼');
+  var all = readText_(subject);
+  var hit = all.filter(function (t) { return t.page === n; })[0];
+  var alias = false;
+  if (!hit) {
+    var prev = all.filter(function (t) { return t.page < n; }).sort(function (a, b) { return b.page - a.page; })[0];
+    if (!prev) throw new Error('沒有第 ' + n + ' 頁的原文');
+    hit = prev; alias = true;
+  }
+  var pages = all.map(function (t) { return t.page; }).sort(function (a, b) { return a - b; });
+  return { page: hit.page, requested: n, alias: alias, chapter: hit.chapter, text: hit.text,
+    prev: pages.filter(function (p) { return p < hit.page; }).pop() || null,
+    next: pages.filter(function (p) { return p > hit.page; })[0] || null };
+}
+
+/** 全文關鍵字搜尋：回傳每頁的命中片段（最多 50 頁） */
+function searchText(subject, q) {
+  q = String(q || '').trim();
+  if (q.length < 2) throw new Error('請輸入至少 2 個字');
+  var terms = q.split(/\s+/).filter(String);
+  var out = [];
+  readText_(subject).forEach(function (t) {
+    var txt = t.text;
+    if (!terms.every(function (k) { return txt.indexOf(k) >= 0; })) return;
+    var i = txt.indexOf(terms[0]);
+    var s = Math.max(0, i - 40), e = Math.min(txt.length, i + terms[0].length + 80);
+    var count = txt.split(terms[0]).length - 1;
+    out.push({ page: t.page, chapter: t.chapter, count: count, snippet: (s > 0 ? '…' : '') + txt.slice(s, e).replace(/\n/g, ' ') + (e < txt.length ? '…' : '') });
+  });
+  out.sort(function (a, b) { return b.count - a.count || a.page - b.page; });
+  return { q: q, total: out.length, results: out.slice(0, 50) };
+}
+
+/** 批次匯入教材：rows = [[科目,頁碼,章節,原文], ...]；同科目同頁碼已存在則覆蓋 */
+function importPages(rows) {
+  var sh = textSheet_();
+  var existing = {};
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function (r, i) { existing[String(r[0]) + '|' + String(r[1])] = i + 2; });
+  }
+  var toAdd = [], updated = 0;
+  rows.forEach(function (r) {
+    if (!r || r.length < 4) return;
+    var row = [String(r[0]), Number(r[1]), Number(r[2]) || '', String(r[3])];
+    var key = row[0] + '|' + row[1];
+    if (existing[key]) { sh.getRange(existing[key], 1, 1, 4).setValues([row]); updated++; }
+    else toAdd.push(row);
+  });
+  if (toAdd.length) sh.getRange(sh.getLastRow() + 1, 1, toAdd.length, 4).setValues(toAdd);
+  return { added: toAdd.length, updated: updated };
+}
+
+/** 寫入題庫「關鍵句」欄：items = [{id, keys:[{page,text}]}] */
+function setKeys(items) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BANK);
+  if (!sh) throw new Error('找不到「題庫」工作表');
+  var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  var col = header.indexOf('關鍵句') + 1;
+  if (!col) { col = header.length + 1; sh.getRange(1, col).setValue('關鍵句'); }
+  var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(function (r) { return String(r[0]).trim(); });
+  var n = 0, missing = [];
+  items.forEach(function (it) {
+    var i = ids.indexOf(String(it.id).trim());
+    if (i < 0) { missing.push(it.id); return; }
+    sh.getRange(i + 2, col).setValue(JSON.stringify(it.keys || []));
+    n++;
+  });
+  return { updated: n, missing: missing };
+}
+
 /** 某一場次的逐題明細：題目、選項、我的答案、正確答案、對錯、教材頁碼（依作答順序） */
 function getSessionDetail(subject, session) {
   if (!session) throw new Error('缺少場次');
@@ -294,7 +410,7 @@ function getSessionDetail(subject, session) {
     return {
       id: l.id, chapter: l.chapter, source: l.source, mode: l.mode, time: l.time,
       chosen: l.chosen, answer: l.answer, correct: l.correct,
-      stem: q.stem || '（題目已不在題庫中）', options: q.options || [], page: q.page || '', objective: q.objective || ''
+      stem: q.stem || '（題目已不在題庫中）', options: q.options || [], page: q.page || '', objective: q.objective || '', keys: q.keys || []
     };
   });
   return { session: String(session), total: items.length,
