@@ -98,12 +98,23 @@
   <button data-tab="settings" onclick="renderSettings()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>設定</button>
 </nav>
 
+<script src="config.js"></script>
 <script>
-// ---------- 設定（存在瀏覽器 localStorage） ----------
+// ---------- 設定 ----------
+// 網址來自 config.js（不是祕密）；裝置授權碼每台裝置填一次，存在這台裝置的 localStorage。
 var CFG_KEY = 'quiz-platform.config';
-function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); } catch(e){ return {}; } }
+function loadCfg(){
+  var c = {}; try { c = JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); } catch(e){}
+  if (!c.apiUrl && window.QP_CONFIG && window.QP_CONFIG.apiUrl) c.apiUrl = window.QP_CONFIG.apiUrl;
+  return c;
+}
 function saveCfg(c){ try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){} }
 var cfg = loadCfg();
+// 透過 QR / 連結設定：…/web/#code=XXXXX-XXXXX-XXXXX-XXXXX → 存起來並把授權碼從網址移除
+(function(){
+  var m = (location.hash||'').match(/[#&]code=([A-Za-z0-9-]{16,})/);
+  if (m){ cfg.token = m[1].toUpperCase(); saveCfg(cfg); try { history.replaceState(null, '', location.pathname + location.search); } catch(e){ location.hash=''; } }
+})();
 
 var state = { meta:null, subject:null, chapters:{}, source:'all', mode:'practice', shuffleQ:false, shuffleO:false,
               queue:[], idx:0, answers:{}, session:null, onlyWrong:false, mock:false, mockMin:120, deadline:null, timer:null };
@@ -129,30 +140,45 @@ function apiPost(action, payload){
 function parse_(r){
   return r.text().then(function(t){
     var j; try { j = JSON.parse(t); } catch(e){ throw new Error('API 回傳的不是 JSON，請確認網址正確且部署為「任何人」可存取。'); }
-    if (!j.ok) throw new Error(j.error || 'API 錯誤');
+    if (!j.ok){ var err = new Error(j.error==='unauthorized' ? '這台裝置的授權碼無效或已被停用' : (j.error || 'API 錯誤')); err.unauthorized = (j.error==='unauthorized'); throw err; }
     return j.data;
   });
 }
-function fail(e){ $('<div class="card err">發生錯誤：'+esc(e && e.message || e)+'</div><button class="wide" onclick="loadHome()">重試</button><button class="wide" onclick="renderSettings()">設定</button>'); }
+function fail(e){
+  if (e && e.unauthorized) return renderSettings(e.message);
+  $('<div class="card err">發生錯誤：'+esc(e && e.message || e)+'</div><button class="wide" onclick="loadHome()">重試</button><button class="wide" onclick="renderSettings()">設定</button>');
+}
 
 // ---------- 設定頁 ----------
 function renderSettings(msg){
+  var has = !!cfg.token;
   $('<h1>設定</h1>'
-   +'<div class="card"><div class="muted">第一次使用請填入 Apps Script 網頁應用程式網址與 API Token（只存在這台裝置的瀏覽器）。</div>'
-   +'<p><b>API 網址</b><br><input type="url" id="apiUrl" placeholder="https://script.google.com/macros/s/…/exec" value="'+esc(cfg.apiUrl||'')+'"></p>'
-   +'<p><b>API Token</b><br><input type="text" id="token" placeholder="執行 generateToken() 取得" value="'+esc(cfg.token||'')+'"></p>'
-   +(msg?'<div class="muted err">'+esc(msg)+'</div>':'')
+   +'<div class="card"><b>裝置授權碼</b>'
+   +(has && !window._changeCode
+      ? '<div class="muted" style="margin:6px 0 10px">這台裝置已授權（…'+esc(String(cfg.token).slice(-5))+'）。</div>'
+        +'<button onclick="window._changeCode=true;renderSettings()">更換授權碼</button> '
+        +'<button onclick="if(confirm(\'移除這台裝置的授權碼？之後要重新輸入才能使用。\')){cfg.token=\'\';saveCfg(cfg);renderSettings();}" style="color:var(--bad)">移除</button>'
+      : '<div class="muted" style="margin:6px 0 10px">每台裝置第一次使用時輸入一次就好。授權碼在試算表選單「測驗平台 → 新增裝置授權碼」產生；用相機掃那裡的 QR code 可以直接完成設定、不用打字。</div>'
+        +'<input type="text" id="token" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" value="">')
+   +(msg?'<div class="muted err" style="margin-top:8px">'+esc(msg)+'</div>':'')
    +'</div>'
-   +'<button class="primary wide" onclick="saveSettings()">儲存並連線</button>'
-   +(cfg.apiUrl?'<button class="wide" onclick="loadHome()">返回</button>':''),'settings');
+   +'<details class="card" style="padding:12px 16px"><summary class="muted" style="cursor:pointer">連線設定（通常不用改）</summary>'
+   +'<p><b>API 網址</b><br><input type="url" id="apiUrl" placeholder="https://script.google.com/macros/s/…/exec" value="'+esc(cfg.apiUrl||'')+'"></p>'
+   +'<div class="muted">預設來自 config.js；只有後端重新部署到不同網址時才需要改。</div></details>'
+   +((!has || window._changeCode) ? '<button class="primary wide" onclick="saveSettings()">儲存並連線</button>' : '<button class="primary wide" onclick="saveSettings()">測試連線</button>')
+   +(has?'<button class="wide" onclick="window._changeCode=false;loadHome()">返回</button>':''),'settings');
+  var el = document.getElementById('token'); if (el) setTimeout(function(){ el.focus(); }, 50);
 }
 function saveSettings(){
-  cfg = { apiUrl: document.getElementById('apiUrl').value.trim(), token: document.getElementById('token').value.trim() };
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(cfg.apiUrl)) return renderSettings('網址格式不對，應該是 https://script.google.com/macros/s/…/exec');
-  if (!cfg.token) return renderSettings('請填入 Token');
-  saveCfg(cfg);
+  var url = (document.getElementById('apiUrl').value||'').trim();
+  var tEl = document.getElementById('token');
+  var tok = tEl ? tEl.value.trim().toUpperCase() : cfg.token;
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return renderSettings('網址格式不對，應該是 https://script.google.com/macros/s/…/exec');
+  if (!tok) return renderSettings('請輸入裝置授權碼');
+  var old = cfg; cfg = { apiUrl: url, token: tok };
   $('<div class="spin">連線測試中…</div>');
-  apiGet('ping').then(loadHome).catch(function(e){ renderSettings('連線失敗：'+(e.message||e)); });
+  apiGet('ping').then(function(){ saveCfg(cfg); window._changeCode=false; loadHome(); })
+    .catch(function(e){ cfg = old; renderSettings('連線失敗：'+(e.message||e)); });
 }
 
 // ---------- 首頁 ----------

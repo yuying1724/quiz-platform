@@ -1,6 +1,6 @@
 // 只快取前端靜態檔，API 永遠走網路
-var CACHE = 'quiz-platform-v6';
-var ASSETS = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+var CACHE = 'quiz-platform-v7';
+var ASSETS = ['./', './index.html', './config.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }).then(function () { return self.skipWaiting(); }));
 });
