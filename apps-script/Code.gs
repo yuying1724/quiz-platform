@@ -3,7 +3,8 @@
  *
  * 資料：同一個試算表內的「題庫」與「作答紀錄」兩張工作表。
  * 前端：獨立的 PWA（web/index.html），以 fetch 呼叫此 API。
- * 驗證：Script Properties 的 API_TOKEN（執行 generateToken() 產生）。
+ * 驗證：每台裝置一組「裝置授權碼」（試算表選單「測驗平台 → 新增裝置授權碼」產生，工作表只存雜湊）；
+ *       Script Properties 的 API_TOKEN 只給維運用（匯入、管理裝置），不放進前端。
  * 部署：網頁應用程式 → 執行身分「我」、存取權「任何人」（靠 token 擋）。
  *
  * API
@@ -17,11 +18,16 @@
  *   POST body(JSON): { token, action:'setKeys', items:[{id, keys:[{page,text}]},…] }
  *   POST body(JSON): { token, action:'answer',  rec:{…} }
  *   POST body(JSON): { token, action:'answers', recs:[{…}] }
+ *   POST body(JSON): { token(admin), action:'newDevice', name }        → { code, setupUrl }
+ *   POST body(JSON): { token(admin), action:'listDevices' } / { action:'setDevice', hash, enabled }
  */
 
 var SHEET_BANK = '題庫';
 var SHEET_LOG = '作答紀錄';
 var SHEET_TEXT = '教材';
+var SHEET_DEV = '裝置';
+var DEV_COLS = ['授權碼雜湊', '裝置名稱', '建立時間', '最後使用', '啟用'];
+var APP_URL = 'https://yuying1724.github.io/quiz-platform/web/';
 
 var BANK_COLS = ['題號', '科目', '來源', '章節', '學習目標', '題目',
   '選項1', '選項2', '選項3', '選項4', '選項5', '答案', '教材頁碼', '啟用', '關鍵句'];
@@ -67,6 +73,120 @@ function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('API_TOKEN') || '';
 }
 
+// ---------- 裝置授權碼 ----------
+// 前端只持有「裝置授權碼」（每台裝置一組，輸入一次後存在該裝置）；試算表只存雜湊，可個別停用。
+// Script Properties 的 API_TOKEN 保留給維運（匯入題庫、管理裝置），不放進任何前端檔案。
+
+var ADMIN_ACTIONS = ['import', 'importPages', 'setKeys', 'newDevice', 'listDevices', 'setDevice', 'rotateToken'];
+
+function hash_(s) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8)
+    .map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
+}
+function normCode_(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+function devSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_DEV);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_DEV);
+    sh.getRange(1, 1, 1, DEV_COLS.length).setValues([DEV_COLS]);
+    sh.setFrozenRows(1);
+    sh.getRange('C:D').setNumberFormat('yyyy-mm-dd hh:mm');
+  }
+  return sh;
+}
+
+/** 回傳 { ok, admin, row } */
+function checkAuth_(token) {
+  if (!token) return { ok: false };
+  var admin = getToken_();
+  if (admin && token === admin) return { ok: true, admin: true };
+  var code = normCode_(token);
+  if (code.length < 16) return { ok: false };
+  var h = hash_(code);
+  var sh = devSheet_();
+  if (sh.getLastRow() < 2) return { ok: false };
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, DEV_COLS.length).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]) === h) {
+      if (String(rows[i][4]).toUpperCase() === 'N') return { ok: false };
+      // 最後使用時間：超過 10 分鐘才更新，避免每次請求都寫表
+      var last = rows[i][3] instanceof Date ? rows[i][3].getTime() : 0;
+      if (Date.now() - last > 600000) sh.getRange(i + 2, 4).setValue(new Date());
+      return { ok: true, admin: false, row: i + 2 };
+    }
+  }
+  return { ok: false };
+}
+
+/** 產生一組新的裝置授權碼（明碼只回傳這一次），格式 XXXXX-XXXXX-XXXXX-XXXXX */
+function newDevice(name) {
+  var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var raw = '';
+  for (var i = 0; i < 20; i++) raw += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  var code = raw.match(/.{5}/g).join('-');
+  var sh = devSheet_();
+  sh.appendRow([hash_(raw), String(name || '未命名裝置'), new Date(), '', 'Y']);
+  return { code: code, name: String(name || '未命名裝置'), setupUrl: APP_URL + '#code=' + code };
+}
+
+function listDevices() {
+  var sh = devSheet_();
+  if (sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, DEV_COLS.length).getValues().map(function (r) {
+    return { hash: String(r[0]).slice(0, 8), name: String(r[1]), created: r[2] instanceof Date ? r[2].getTime() : null,
+      lastUsed: r[3] instanceof Date ? r[3].getTime() : null, enabled: String(r[4]).toUpperCase() !== 'N' };
+  });
+}
+
+/** 依雜湊前 8 碼啟用/停用裝置 */
+function setDevice(hashPrefix, enabled) {
+  var sh = devSheet_();
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).indexOf(String(hashPrefix)) === 0) { sh.getRange(i + 2, 5).setValue(enabled ? 'Y' : 'N'); return { updated: 1 }; }
+  }
+  return { updated: 0 };
+}
+
+// ---------- 試算表選單（開啟試算表時出現「測驗平台」選單） ----------
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('測驗平台')
+    .addItem('新增裝置授權碼', 'menuNewDevice')
+    .addItem('查看裝置清單', 'menuListDevices')
+    .addToUi();
+}
+
+function menuNewDevice() {
+  var ui = SpreadsheetApp.getUi();
+  var r = ui.prompt('新增裝置授權碼', '幫這台裝置取個名字（例如：手機、iPad、公司電腦）：', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  var d = newDevice(r.getResponseText().trim() || '未命名裝置');
+  var qr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(d.setupUrl);
+  var html = '<div style="font:15px/1.6 sans-serif;padding:8px 12px">'
+    + '<p>裝置「<b>' + d.name + '</b>」的授權碼（只會顯示這一次）：</p>'
+    + '<p style="font:700 22px monospace;letter-spacing:1px;background:#f4efdf;padding:10px;border-radius:8px">' + d.code + '</p>'
+    + '<p>新裝置的設定方式擇一：</p><ol><li>用相機掃下方 QR code，開啟後自動完成設定</li>'
+    + '<li>或在新裝置開啟 App → 設定 → 貼上授權碼</li></ol>'
+    + '<p style="text-align:center"><img src="' + qr + '" width="220" height="220" alt="QR"></p>'
+    + '<p style="font-size:13px;color:#666">連結：<br>' + d.setupUrl + '</p></div>';
+  ui.showModalDialog(HtmlService.createHtmlOutput(html).setWidth(420).setHeight(560), '新增裝置授權碼');
+}
+
+function menuListDevices() {
+  var list = listDevices();
+  var rows = list.map(function (d) {
+    var f = function (t) { return t ? Utilities.formatDate(new Date(t), 'Asia/Taipei', 'yyyy-MM-dd HH:mm') : '—'; };
+    return '<tr><td>' + d.name + '</td><td>' + f(d.created) + '</td><td>' + f(d.lastUsed) + '</td><td>' + (d.enabled ? '啟用' : '已停用') + '</td></tr>';
+  }).join('');
+  var html = '<div style="font:14px/1.6 sans-serif;padding:8px 12px"><table border="0" cellpadding="6" style="border-collapse:collapse;width:100%">'
+    + '<tr style="background:#f4efdf"><th align="left">裝置</th><th align="left">建立</th><th align="left">最後使用</th><th align="left">狀態</th></tr>' + rows + '</table>'
+    + '<p style="font-size:13px;color:#666">要停用某台裝置，直接在「裝置」工作表把該列的「啟用」改成 N。</p></div>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(520).setHeight(360), '裝置清單');
+}
+
 // ---------- HTTP 入口 ----------
 
 function doGet(e) {
@@ -81,13 +201,22 @@ function doPost(e) {
 
 function handle_(p, body) {
   try {
-    var token = getToken_();
-    if (!token) return json_({ ok: false, error: '尚未設定 API_TOKEN，請先執行 generateToken()' });
-    if (String(p.token || '') !== token) return json_({ ok: false, error: 'unauthorized' });
+    var auth = checkAuth_(String(p.token || ''));
+    if (!auth.ok) return json_({ ok: false, error: 'unauthorized' });
 
     var action = String(p.action || '');
     var data;
+    // 管理用動作（匯入、改題庫、管理裝置）只接受 Script Properties 的 API_TOKEN
+    if (ADMIN_ACTIONS.indexOf(action) >= 0 && !auth.admin) return json_({ ok: false, error: 'unauthorized' });
     switch (action) {
+      case 'newDevice':
+        data = newDevice(body.name); break;
+      case 'listDevices':
+        data = listDevices(); break;
+      case 'setDevice':
+        data = setDevice(body.hash, body.enabled); break;
+      case 'rotateToken':
+        data = { token: generateToken() }; break;
       case 'meta':
         data = getMeta(); break;
       case 'questions':
