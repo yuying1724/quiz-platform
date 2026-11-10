@@ -77,6 +77,8 @@
   .keys .t { font-size:13px; color:var(--muted); margin-bottom:6px; }
   .key { background:#fff6d6; border-left:4px solid var(--gold); border-radius:8px; padding:8px 10px; margin-bottom:6px; font-size:15px; line-height:1.6; }
   .key .pg { color:var(--muted); font-size:12px; margin-left:4px; white-space:nowrap; }
+  .key.w { background:#fbeeeb; border-left-color:var(--bad); }
+  .wopt { font-size:13px; color:var(--text); margin:8px 0 4px; font-weight:600; }
   mark { background:#ffe28a; color:inherit; padding:0 2px; border-radius:3px; }
   .ovl { position:fixed; inset:0; background:var(--bg); z-index:20; overflow:auto; -webkit-overflow-scrolling:touch; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); display:none; }
   .ovl.on { display:block; }
@@ -244,8 +246,18 @@ function selectedChapters(){ return Object.keys(state.chapters).filter(function(
 function newSession(){ return new Date().toISOString().replace(/[-:T]/g,'').slice(0,14); }
 function shuffle(a){ for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
 function prepare(qs){
-  qs.forEach(function(q){ var idx = q.options.map(function(_,i){ return i; }); q.perm = state.shuffleO ? shuffle(idx) : idx; });
+  qs.forEach(function(q){ var idx = q.options.map(function(_,i){ return i; }); q.perm = (state.shuffleO && !fixedOrder(q)) ? shuffle(idx) : idx; });
   return qs;
+}
+// 選項順序有意義的題目不打亂：「以上皆是」類、A/B 陳述組合題、是非題、題目裡提到選項編號的題目
+function fixedOrder(q){
+  if (q.options.length <= 2) return true;
+  if (/選項（[1-5１-５]）|（[1-5１-５]）到（[1-5１-５]）/.test(q.stem)) return true;
+  return q.options.some(function(o){
+    o = String(o).trim();
+    return /^(以上|上述)/.test(o) || /(以上|上述).{0,8}(各項|選項|所有|全部|都|皆)/.test(o)
+        || /^(只|僅)?包括 ?(案例|情形|行為|陳述)? ?[A-D]/.test(o) || /^既不/.test(o);
+  });
 }
 function startQuiz(onlyWrong){
   state.onlyWrong = onlyWrong; state.mock = false; stopTimer();
@@ -301,7 +313,7 @@ function renderQ(){
   if (reveal){
     var shown = perm.indexOf(q.answer-1)+1;
     h += '<div class="fb '+(a===q.answer?'ok':'bad')+'">'+(a===q.answer?'答對了':'答錯了，正確答案是（'+shown+'）')+'</div>';
-    h += keysHtml(q.keys, q.page);
+    h += keysHtml(q, a);
   }
   h += '</div>';
   h += '<div class="row" style="justify-content:space-between">';
@@ -354,7 +366,7 @@ function renderResult(partial){
       var perm = q.perm || q.options.map(function(_,i){ return i; });
       perm.forEach(function(oi,i){ var n=oi+1; var cls = n===q.answer?'ok':(n===state.answers[q.id]?'bad':'');
         h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+(i+1)+'）'+esc(q.options[oi])+'</div>'; });
-      h += keysHtml(q.keys, q.page) + '</div>';
+      h += keysHtml(q, state.answers[q.id]) + '</div>';
     });
     h += '<button class="primary wide" onclick="retryWrong()">重練這些錯題</button>';
   } else if (total) {
@@ -414,7 +426,7 @@ function showSession(session){
       it.options.forEach(function(o,i){ var k=i+1, cls = k===it.answer?'ok':(k===it.chosen?'bad':'');
         var tag = k===it.answer ? '　✓ 正確答案' : (k===it.chosen ? '　✗ 我的答案' : '');
         h += '<div class="opt '+cls+'" style="padding:8px 12px">（'+k+'）'+esc(o)+'<span class="muted" style="font-size:12px">'+tag+'</span></div>'; });
-      h += keysHtml(it.keys, it.page) + '</div>';
+      h += keysHtml(it, it.chosen) + '</div>';
     });
     h += '<button class="wide" onclick="loadHistory()">回作答紀錄</button>';
     window._detail = d;
@@ -433,18 +445,38 @@ function retrySession(){
 
 // ---------- 教材：關鍵句、整頁原文、搜尋 ----------
 // 關鍵句區塊（題目揭曉、結果頁、場次明細共用）。keys = [{page,text}]
-function keysHtml(keys, pageRef){
+function keyLine(k, cls){
+  var id = (window._K = window._K || []).push([k.text]) - 1;
+  return '<div class="key'+(cls?' '+cls:'')+'">'+esc(k.text)+' <span class="pg">p.'+k.page+'</span>'
+       + ' <button class="link" style="padding:0 4px;font-size:13px" onclick="openPage('+k.page+',window._hl=window._K['+id+'])">看整頁 ›</button></div>';
+}
+// q 需有 keys / page / options（/ perm）；chosen = 使用者選的原始選項編號
+// keys 內沒有 opt 的是支撐正確答案的句子；有 opt 的是「其他選項為什麼不是答案」（opt=0 時用 label，例如「陳述 B」）
+function keysHtml(q, chosen){
+  var all = q.keys || [];
+  var keys = all.filter(function(k){ return k.opt === undefined || k.opt === null; });
+  var wrong = all.filter(function(k){ return k.opt !== undefined && k.opt !== null; });
   var h = '<div class="keys"><div class="t">教材原文（支撐答案的句子，底色為標記處）</div>';
-  if (keys && keys.length){
-    keys.forEach(function(k){
-      var id = (window._K = window._K || []).push([k.text]) - 1;
-      h += '<div class="key">'+esc(k.text)+' <span class="pg">p.'+k.page+'</span>'
-         + ' <button class="link" style="padding:0 4px;font-size:13px" onclick="openPage('+k.page+',window._hl=window._K['+id+'])">看整頁 ›</button></div>';
+  if (keys.length) keys.forEach(function(k){ h += keyLine(k); });
+  else h += '<div class="muted">這題尚未標記關鍵句。</div>';
+  if (wrong.length){
+    var perm = q.perm || (q.options||[]).map(function(_,i){ return i; });
+    var disp = function(opt){ var i = perm.indexOf(opt-1); return i < 0 ? opt : i+1; };
+    var groups = {}, order = [];
+    wrong.forEach(function(k){ var g = k.opt ? 'o'+k.opt : 'l'+(k.label||''); if (!groups[g]){ groups[g] = []; order.push(g); } groups[g].push(k); });
+    order.sort(function(x,y){ var kx = groups[x][0], ky = groups[y][0];
+      var px = kx.opt ? (kx.opt===chosen ? -1 : disp(kx.opt)) : 99, py = ky.opt ? (ky.opt===chosen ? -1 : disp(ky.opt)) : 99; return px - py; });
+    h += '<div class="t" style="margin-top:12px">其他選項為什麼不是答案（教材原文）</div>';
+    order.forEach(function(g){
+      var k0 = groups[g][0], title;
+      if (k0.opt){ var txt = String((q.options||[])[k0.opt-1] || ''); if (txt.length > 46) txt = txt.slice(0,46)+'…';
+        title = '（'+disp(k0.opt)+'）'+esc(txt)+(k0.opt===chosen ? ' <b style="color:var(--bad)">← 你選的</b>' : ''); }
+      else title = esc(k0.label || '其他');
+      h += '<div class="wopt">'+title+'</div>';
+      groups[g].forEach(function(k){ h += keyLine(k, 'w'); });
     });
-  } else {
-    h += '<div class="muted">這題尚未標記關鍵句。</div>';
   }
-  var pages = parsePages(pageRef);
+  var pages = parsePages(q.page);
   if (pages.length) h += '<div class="muted" style="margin-top:4px">教材出處（點頁碼看整頁）：'
     + pages.map(function(p){ return '<button class="link" style="padding:0 4px;font-size:13px" onclick="openPage('+p+',window._hl=[])">p.'+p+'</button>'; }).join('')+'</div>';
   return h + '</div>';
